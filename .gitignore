@@ -1,0 +1,22 @@
+# Local configuration — copy config.example.yaml to config.yaml and edit.
+config.yaml
+
+# Runtime state: the seen-set, 13F tracker baselines, archived briefs.
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
