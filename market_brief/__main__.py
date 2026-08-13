@@ -15,6 +15,14 @@ from . import brief, config
 
 
 def _configure_logging(verbose: bool):
+    # Log messages carry em-dashes and quoted feed titles, and a Windows
+    # console defaults to cp1252 — without this, a log line about a failure
+    # becomes its own UnicodeEncodeError. stdout is handled in ConsoleSender.
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass  # already wrapped or not reconfigurable (captured/piped stderr)
+
     logging.basicConfig(
         level=logging.INFO if verbose else logging.WARNING,
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
