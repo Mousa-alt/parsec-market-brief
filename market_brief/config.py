@@ -2,15 +2,7 @@
 
 Everything the pipeline needs is a module-level constant here, so the rest of
 the package never touches the filesystem to answer "what is on the watchlist".
-
-Resolution order for the config file:
-  1. ``$MARKET_BRIEF_CONFIG`` (absolute or relative path)
-  2. ``./config.yaml`` next to the package root
-  3. ``./config.example.yaml`` — so a fresh clone runs before it is configured
-
-A malformed or missing section degrades to a safe default and logs; it never
-raises at import time. An empty watchlist is the natural no-op: nothing to
-price, nothing to match, an empty brief.
+A malformed section degrades to a safe default and never raises at import time.
 """
 
 import logging
@@ -21,14 +13,8 @@ from pathlib import Path
 import yaml
 
 logger = logging.getLogger(__name__)
-
-#: Repo root — one level up from this package.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-#: Where the seen-set, the 13F tracker state, and the brief archive live.
-DATA_DIR: Path = Path(
-    os.environ.get("MARKET_BRIEF_DATA_DIR") or (PROJECT_ROOT / "data")
-).resolve()
+DATA_DIR: Path = Path(os.environ.get("MARKET_BRIEF_DATA_DIR") or (PROJECT_ROOT / "data")).resolve()
 
 
 def _resolve_config_path() -> Path | None:
@@ -44,10 +30,7 @@ def _resolve_config_path() -> Path | None:
         candidate = PROJECT_ROOT / name
         if candidate.exists():
             if name.endswith(".example.yaml"):
-                logger.warning(
-                    "No config.yaml found — falling back to config.example.yaml. "
-                    "Copy it to config.yaml and edit before relying on the output."
-                )
+                logger.warning("No config.yaml found — falling back to config.example.yaml. Copy it to config.yaml and edit before relying on the output.")
             return candidate
     return None
 
@@ -73,57 +56,40 @@ def _load_yaml(path: Path | None) -> dict:
 _cfg = _load_yaml(CONFIG_PATH)
 
 
-# ── helpers ─────────────────────────────────────────────────────────
-
-
 def _parse_hhmm(value, default: str = "08:00") -> str:
-    """Coerce a config time to a valid 'HH:MM' string; fall back + log on bad input.
-
-    YAML parses an unquoted ``08:00`` as the int 480 (8*60 sexagesimal), which
-    then crashes consumers expecting a string. This degrades a bad value to the
-    field's default instead of crashing whatever schedules the run.
-    """
     s = str(value).strip()
     if ":" not in s:
-        logger.warning(f"Invalid HH:MM config value {value!r}; using {default!r}")
+        logger.warning("Invalid HH:MM config value %r; using %r", value, default)
         return default
     return s
 
 
 def _trigger_list(raw, label: str) -> list[str]:
-    """Normalise a configured keyword list: strings, stripped, lower-cased.
-
-    A single string is accepted as a one-item list — the yaml is written by
-    hand and ``macro_keywords: CBE`` is the obvious mistake to survive.
-    """
     if isinstance(raw, str):
         raw = [raw]
     out: list[str] = []
     if isinstance(raw, (list, tuple)):
         out = [t.strip().casefold() for t in raw if isinstance(t, str) and t.strip()]
     if raw and not out:
-        # Silently returning [] would switch the feature off and look exactly
-        # like not configuring it. Say so, or the next person edits the yaml,
-        # sees no change, and goes looking in the wrong file.
         logger.warning("%s ignored — expected a list of strings, got %r", label, raw)
     return out
 
 
+def _optional_float(value, field: str, label: str):
+    if value is None or value == "":
+        return None
+    try:
+        number = float(value)
+        if number < 0:
+            raise ValueError
+        return number
+    except (TypeError, ValueError):
+        logger.warning("%s: invalid %s %r; ignoring position field", label, field, value)
+        return None
+
+
 def _watchlist_entries(raw, label: str = "market_brief.watchlist") -> list[dict]:
-    """Normalise the watchlist: a list of {symbol, name, ...} dicts.
-
-    Two kinds of entry are valid:
-      * priced — has a `symbol`, gets a quote and can be flagged as a mover;
-      * news-only — has a `name` (and usually aliases) but no tradeable symbol
-        we trust. EGX names are the case: their Yahoo symbols are ISIN-based
-        and easy to get wrong, and a wrong symbol is worse than no symbol.
-        `news_only: true` also forces this for an entry that HAS a symbol.
-    An entry with neither symbol nor name means nothing at all and is dropped
-    with a warning rather than crashing the scan later.
-
-    Aliases are kept as written — Arabic aliases must survive verbatim, so
-    nothing here lower-cases them; matching casefolds at compare time instead.
-    """
+    """Normalise watchlist rows while preserving optional P0.1 position data."""
     out: list[dict] = []
     if not isinstance(raw, (list, tuple)):
         if raw:
@@ -141,26 +107,26 @@ def _watchlist_entries(raw, label: str = "market_brief.watchlist") -> list[dict]
         aliases = entry.get("aliases", [])
         if isinstance(aliases, str):
             aliases = [aliases]
-        # No symbol → nothing to price, so it is news-only by construction.
         news_only = bool(entry.get("news_only", False)) or not symbol
-        out.append({
+        row = {
             "symbol": symbol,
             "name": name or symbol,
             "aliases": [str(a).strip() for a in aliases if str(a).strip()],
             "market": str(entry.get("market", "")).strip(),
             "watch_only": bool(entry.get("watch_only", False)),
             "news_only": news_only,
-        })
+            "quantity": _optional_float(entry.get("quantity"), "quantity", label),
+            "cost_basis": _optional_float(entry.get("cost_basis"), "cost_basis", label),
+            "currency": str(entry.get("currency", "")).strip().upper(),
+            "account": str(entry.get("account", "")).strip(),
+        }
+        if news_only:
+            row.update({"quantity": None, "cost_basis": None, "currency": "", "account": ""})
+        out.append(row)
     return out
 
 
 def _tracker_entries(raw, label: str = "market_brief.trackers") -> list[dict]:
-    """Normalise the 13F tracker list: {name, cik} dicts with a padded CIK.
-
-    EDGAR's submissions endpoint only answers to the zero-padded 10-digit CIK,
-    and the yaml is hand-written — so the padding happens here, once, instead
-    of being a trap for whoever adds the next manager.
-    """
     out: list[dict] = []
     if not isinstance(raw, (list, tuple)):
         if raw:
@@ -168,101 +134,52 @@ def _tracker_entries(raw, label: str = "market_brief.trackers") -> list[dict]:
         return out
     for entry in raw:
         if not isinstance(entry, dict):
-            logger.warning("%s: skipping non-dict entry %r", label, entry)
             continue
         cik = re.sub(r"\D", "", str(entry.get("cik", "")))
         if not cik:
             logger.warning("%s: skipping tracker without a CIK: %r", label, entry)
             continue
-        out.append({
-            "name": str(entry.get("name", "")).strip() or f"CIK {cik}",
-            "cik": cik.zfill(10),
-        })
+        out.append({"name": str(entry.get("name", "")).strip() or f"CIK {cik}", "cik": cik.zfill(10)})
     return out
 
 
-# ── time ────────────────────────────────────────────────────────────
-
-#: All dates in this app — the seen-set TTL, the 13F staleness window, the
-#: brief's own date — are market-local, not server-local. A UTC host would
-#: otherwise roll the date over at 22:00 local and dedupe against "tomorrow".
 _DEFAULT_TIMEZONE = "Africa/Cairo"
 TIMEZONE: str = str(_cfg.get("timezone", _DEFAULT_TIMEZONE)).strip() or _DEFAULT_TIMEZONE
 
 
 def now():
-    """Timezone-aware ``datetime.now()`` in the configured market timezone.
-
-    Degrades rather than raises, in two steps. A bad timezone *name* is a
-    config error and falls back to the default. A missing IANA database is an
-    environment problem — zoneinfo ships no bundled copy, so a Windows host or
-    a slim container without the `tzdata` package has none — and falls back to
-    system-local time with a loud log. Both are wrong-but-running, which is
-    what a monitor should do; a crash here would take the whole brief down
-    over a clock.
-    """
     from datetime import datetime
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
     for name in (TIMEZONE, _DEFAULT_TIMEZONE):
         try:
             return datetime.now(ZoneInfo(name))
         except (ZoneInfoNotFoundError, KeyError, ValueError):
-            logger.error(
-                "Timezone %r unavailable (is the `tzdata` package installed?)", name
-            )
+            logger.error("Timezone %r unavailable (is the `tzdata` package installed?)", name)
     return datetime.now().astimezone()
 
 
 def today():
-    """``date.today()`` in the configured market timezone."""
     return now().date()
 
 
-# ── market brief ────────────────────────────────────────────────────
-
-# Default OFF with an EMPTY watchlist: this reports one person's holdings, so
-# an unconfigured deployment must do nothing rather than guess. An empty
-# watchlist is also the safe no-op if the section is malformed.
 _market_cfg = _cfg.get("market_brief", {})
 if not isinstance(_market_cfg, dict):
     logger.warning("market_brief section is not a mapping; ignoring it")
     _market_cfg = {}
 
 MARKET_BRIEF_ENABLED: bool = bool(_market_cfg.get("enabled", False))
-MARKET_BRIEF_SCHEDULE_TIME: str = _parse_hhmm(
-    _market_cfg.get("schedule_time", "08:00"), "08:00"
-)
+MARKET_BRIEF_SCHEDULE_TIME: str = _parse_hhmm(_market_cfg.get("schedule_time", "08:00"), "08:00")
 MARKET_BRIEF_WATCHLIST: list[dict] = _watchlist_entries(_market_cfg.get("watchlist", []))
-MARKET_BRIEF_MACRO_KEYWORDS: list[str] = _trigger_list(
-    _market_cfg.get("macro_keywords", []), "market_brief.macro_keywords"
-)
+MARKET_BRIEF_BASE_CURRENCY: str = str(_market_cfg.get("base_currency", "USD")).strip().upper() or "USD"
+MARKET_BRIEF_MACRO_KEYWORDS: list[str] = _trigger_list(_market_cfg.get("macro_keywords", []), "market_brief.macro_keywords")
 MARKET_BRIEF_MAX_ITEMS: int = int(_market_cfg.get("max_items", 25))
-
-# Institutional 13F trackers (SEC EDGAR). Quarterly cadence, so this is nearly
-# always a no-op. SEC blocks requests without a contact address in the
-# User-Agent, so one is always sent.
 MARKET_BRIEF_TRACKERS: list[dict] = _tracker_entries(_market_cfg.get("trackers", []))
-MARKET_BRIEF_SEC_CONTACT: str = str(
-    _market_cfg.get("sec_contact", "market-brief@example.com")
-).strip() or "market-brief@example.com"
-
-#: Model used by the optional narrative composer. Only read when the `claude`
-#: CLI is on PATH; without it the static digest is the whole output.
-COMPOSE_MODEL: str = str(
-    _market_cfg.get("compose_model", "claude-sonnet-4-6")
-).strip() or "claude-sonnet-4-6"
-
-
-# ── delivery ────────────────────────────────────────────────────────
+MARKET_BRIEF_SEC_CONTACT: str = str(_market_cfg.get("sec_contact", "market-brief@example.com")).strip() or "market-brief@example.com"
+COMPOSE_MODEL: str = str(_market_cfg.get("compose_model", "claude-sonnet-4-6")).strip() or "claude-sonnet-4-6"
 
 _delivery_cfg = _cfg.get("delivery", {})
 if not isinstance(_delivery_cfg, dict):
     logger.warning("delivery section is not a mapping; ignoring it")
     _delivery_cfg = {}
-
-#: "console" (default) or "whatsapp". See senders.py for the contract.
 DELIVERY_BACKEND: str = str(_delivery_cfg.get("backend", "console")).strip() or "console"
-DELIVERY_OPTIONS: dict = {
-    k: v for k, v in _delivery_cfg.items() if k != "backend"
-}
+DELIVERY_OPTIONS: dict = {k: v for k, v in _delivery_cfg.items() if k != "backend"}
