@@ -2,14 +2,15 @@
 
 > Where this goes next: from a daily monitor that tells you what moved, to a
 > personal investment-intelligence system that tells you **what actually
-> changed** — across Tadawul, EGX, and the holdings you own. Still no signals.
+> changed** — across the US, Tadawul, and EGX: whatever you hold. Still no
+> signals.
 
-This document builds on a partner proposal, reframed around the source moat.
-The phasing, the "what actually changed?" framing, the fundamentals pack, the
-catalyst calendar, and importance scoring all come from that draft. The market
-priority does not — see [Strategy](#strategy-why-mena-first) and
-[Rejected directions](#explicitly-rejected-directions). This document supersedes
-that draft.
+This document builds on a partner proposal. The phasing, the "what actually
+changed?" framing, the fundamentals pack, the catalyst calendar, and importance
+scoring all come from that draft — reframed portfolio-first rather than
+around any single market; see [Strategy](#strategy-portfolio-first-three-home-markets)
+and [Rejected directions](#explicitly-rejected-directions). This document
+supersedes that draft.
 
 ---
 
@@ -27,16 +28,20 @@ guardrails.
 
 ---
 
-## Strategy: why MENA-first
+## Strategy: portfolio-first, three home markets
 
-The primary markets are **Saudi (Tadawul)**, **Egypt (EGX)**, and **the
-holder's actual portfolio**. The US and global markets are a **context layer**
-— Fed, USD, VIX, rates, and the mega-caps that move MENA sentiment — not the
-main event.
+The product supports three market groups as **equal citizens — US, Saudi
+(Tadawul), and Egypt (EGX)** — and centers every brief on **the holder's
+actual portfolio**. A holder with a US-only book gets a US-centric brief; a
+holder spread across all three gets all three. No market is "primary"; the
+portfolio is.
 
-- **US daily briefs are a commodity.** Every terminal, newsletter, and
+What differs between the markets is not their status but their **scarcity**:
+
+- **US daily coverage is a commodity.** Every terminal, newsletter, and
   general-purpose LLM produces a competent S&P/Nasdaq/Treasuries recap for
-  free. Building a fourth one adds nothing that does not already exist.
+  free — and our US pipeline (Yahoo per-ticker news, SEC EDGAR, Google News
+  macro) is already wired and costs nothing to maintain.
 - **Working MENA coverage is rare and was expensive to get.** See
   [docs/research/sources-evaluation.md](docs/research/sources-evaluation.md):
   the official exchanges are dead to automation (saudiexchange.sa is
@@ -50,13 +55,11 @@ main event.
   bad path with HTML at HTTP 200. Whole-token Arabic matching exists because
   the press writes `الأسمدة`, never bare `أسمدة`. None of this is reproducible
   from documentation; it came from live testing.
-- **US data is the easy half.** Yahoo quotes, Yahoo per-ticker news, Google
-  News macro queries, and SEC EDGAR are all free, official, and already wired.
-  Treating them as a context layer costs almost nothing and keeps effort
-  pointed at the half nobody else has solved.
-
-**Implication for every phase below:** a feature ships for Tadawul and EGX
-first, or it explains in its acceptance criteria why it cannot.
+**Implication for every phase below:** a feature ships for **all three
+markets**; where a market can't be covered (data doesn't exist, source is
+dead), the acceptance criteria say so explicitly instead of silently shipping
+US-only. Development effort leans toward the MENA half only because that's the
+half nobody else has solved — never at the cost of dropping US support.
 
 ---
 
@@ -120,15 +123,18 @@ for Tadawul, EGX30 for Egypt, S&P 500 / FTSE for US/UK) and, where a mapping
 exists, its sector; the relative figure is labelled as such and never framed as
 strength or weakness worth acting on.
 
-### P0.4 US/global context layer (explicitly secondary)
+### P0.4 Global macro block
 
 A compact macro block: Fed decisions and minutes, USD index, VIX, US 10Y, and
-the mega-cap moves large enough to set MENA risk appetite.
+the mega-cap moves large enough to set risk appetite across the holder's
+markets.
 
 **Acceptance:** the block is capped at a fixed small number of lines and never
-displaces MENA items; it is suppressed entirely on a quiet macro day; it names
-transmission to the watchlist ("oil −4%" next to Saudi petrochemical names)
-rather than reciting US market internals.
+displaces portfolio items; it is suppressed entirely on a quiet macro day; it
+names transmission to the watchlist ("oil −4%" next to Saudi petrochemical
+names) rather than reciting market internals for their own sake. Holdings-level
+US coverage (the holder's US tickers) is NOT this block — those are first-class
+portfolio items like any Tadawul or EGX name.
 
 ### P0.5 "What actually changed?"
 
@@ -257,7 +263,7 @@ directionless.
 
 | Rejected | Reason |
 |---|---|
-| **US-first as the primary market** | Commodity output — every terminal, newsletter, and LLM already does it. The defensible asset is hand-verified Tadawul + EGX coverage: [docs/research/sources-evaluation.md](docs/research/sources-evaluation.md). US stays as a context layer (P0.4). |
+| **Recentering the product on US market internals regardless of the holder's portfolio** | The brief follows the portfolio, not a flagship market. Generic S&P/Nasdaq recaps are commodity output every terminal and LLM already produces; the defensible asset is hand-verified Tadawul + EGX coverage alongside full US support: [docs/research/sources-evaluation.md](docs/research/sources-evaluation.md). |
 | **Signals, scores, or buy/sell/hold calls** | The edge does not survive transaction costs and does not survive out-of-sample testing: [docs/research/evidence-review.md](docs/research/evidence-review.md). Daily cadence is context, not alpha. |
 | **Autonomous trading, broker integration, order placement** | Out of scope permanently. This is an intelligence and research system; it never touches an account. |
 | **Multi-model debate / consensus panels** | Measurably worse: deliberative consensus scored ~76% against 82.4% for the best single model and 83.4% for independent confidence-weighted aggregation, via persuasive-error propagation ([docs/research/evidence-review.md](docs/research/evidence-review.md)). One strong model composes. |
@@ -272,14 +278,14 @@ Open a GitHub Issue. A proposal that lands is one that states:
 
 1. **Which phase** it belongs to (P0/P1/P2), or why it needs a new one.
 2. **How it serves attention routing or panic prevention** — the two jobs.
-3. **Its MENA story** — how it works for Tadawul and EGX, or why it honestly
-   cannot.
+3. **Its per-market story** — how it works for US, Tadawul, and EGX, or why a
+   given market honestly cannot be covered.
 4. **Its acceptance criteria**, in the style used above: observable, testable,
    and specific about the degraded case.
 5. **Its guardrail check** — confirmation it introduces no signal, no advice
    language, and no autonomous action.
 
-Proposals that reframe the product around US markets, add recommendations, or
+Proposals that decouple the brief from the holder's portfolio, add recommendations, or
 introduce a debate panel are settled questions; reopen them only with new
 evidence that contradicts the research docs directly.
 
